@@ -8,15 +8,16 @@
 #include <sys/socket.h>
 #include <netinet/ip.h>
 
-void die(const char* s) {
-    printf("calling die for %s\n", s);
+static void die(const char* s) {
+    printf("Error: %s\n", strerror(errno));
+    printf("%s\n", s);
+    exit(1);
 }
 
-void do_something(int connfd) {
+static void do_something(int connfd) {
     char rbuf[64] = {};
     ssize_t n = read(connfd, rbuf, sizeof(rbuf) - 1);
     if (n < 0) {
-        // msg("read() error");
         printf("read() error");
         return;
     }
@@ -36,9 +37,10 @@ int main() {
     int val = 1;
     setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &val, sizeof(val));
 
-    int port = 8000;
-    int address = 0;
+    uint16_t port = 1234;
+    uint32_t address = 0;
     struct sockaddr_in addr = {};
+
     addr.sin_family = domain;
     // binds to port 1234
     addr.sin_port = ntohs(port);
@@ -49,7 +51,6 @@ int main() {
     const sockaddr *ptr_addr = (const sockaddr *)&addr;
     int rv = bind(fd, ptr_addr, sizeof(addr));
     if (rv) {
-        perror("bind() error");
         die("bind()");
     }
 
@@ -58,6 +59,9 @@ int main() {
     // second param is size of queue of backlog requests that our socket has received
     // SOMAXCONN is 128 on unix
     rv = listen(fd, SOMAXCONN);
+    if(rv) {
+        die("listen()");
+    }
 
 
     while (true) {
@@ -72,11 +76,11 @@ int main() {
             printf("connfd is less than 0");
             continue;
         }
-
         do_something(connfd);
         close(connfd);
-
     }
+
+    return 0;
 
 
 
