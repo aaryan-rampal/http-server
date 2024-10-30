@@ -8,15 +8,16 @@
 #include <sys/socket.h>
 #include <netinet/ip.h>
 
-void die(std::string s) {
-    return;
+void die(const char* s) {
+    printf("calling die for %s\n", s);
 }
 
-static void do_something(int connfd) {
+void do_something(int connfd) {
     char rbuf[64] = {};
     ssize_t n = read(connfd, rbuf, sizeof(rbuf) - 1);
     if (n < 0) {
-        msg("read() error");
+        // msg("read() error");
+        printf("read() error");
         return;
     }
     printf("client says: %s\n", rbuf);
@@ -29,13 +30,13 @@ int main() {
     /* Creating our socket */
 
     // first param dictates IPv4/IPv6, second one is UDP/TCP, third is {protocol}?
-    auto domain = AF_INET;
+    int domain = AF_INET;
     int fd = socket(domain, SOCK_STREAM, 0);
 
     int val = 1;
     setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &val, sizeof(val));
 
-    int port = 1234;
+    int port = 8000;
     int address = 0;
     struct sockaddr_in addr = {};
     addr.sin_family = domain;
@@ -48,6 +49,7 @@ int main() {
     const sockaddr *ptr_addr = (const sockaddr *)&addr;
     int rv = bind(fd, ptr_addr, sizeof(addr));
     if (rv) {
+        perror("bind() error");
         die("bind()");
     }
 
@@ -63,10 +65,11 @@ int main() {
         struct sockaddr_in client_addr = {};
         socklen_t addrlen = sizeof(client_addr);
         // same thing as before
-        struct sockaddr *ptr_clt_addr = (const sockaddr *)&client_addr;
+        struct sockaddr *ptr_clt_addr = (struct sockaddr *)&client_addr;
         int connfd = accept(fd, ptr_clt_addr, &addrlen);
         if (connfd < 0) {
             // error
+            printf("connfd is less than 0");
             continue;
         }
 
