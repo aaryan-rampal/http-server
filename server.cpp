@@ -7,6 +7,7 @@
 #include <arpa/inet.h>
 #include <sys/socket.h>
 #include <netinet/ip.h>
+#include <assert.h>
 
 const size_t k_max_msg = 4096;
 
@@ -32,7 +33,7 @@ static int32_t write_all(int fd, const char *buf, size_t n) {
     while (n > 0) {
         ssize_t rv = write(fd, buf, n);
         if (rv <= 0) {
-            return -1
+            return -1;
         }
         assert((size_t)rv <= n);
         n -= (size_t)rv;
@@ -87,7 +88,7 @@ static int32_t one_request(int connfd)
 
     // add eof indicator after the message length
     rbuf[4 + len] = '\0';
-    printf('client says: %s\n', &rbuf[4]);
+    printf("client says: %s\n", &rbuf[4]);
 
     const char reply[] = "world";
     char wbuf[4 + sizeof(reply)];
