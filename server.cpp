@@ -9,6 +9,27 @@
 #include <netinet/ip.h>
 #include <assert.h>
 
+enum 
+{
+    STATE_REQ = 0, // reading request
+    STATE_RES = 1, // sending response
+    STATE_END = 2
+};
+
+struct Conn 
+{
+    int fd = -1;
+    uint32_t state = 0; // STATE_RES or STATE_REQ
+    // reading buffer
+    size_t rbuf_size = 0;
+    uint8_t rbuf[4 + k_max_msg];
+    // writing buffer
+    size_t wbuf_size = 0;
+    size_t wbuf_sent = 0;
+    uint8_t wbuf[4 + k_max_msg];
+};
+
+
 const size_t k_max_msg = 4096;
 
 static int32_t read_full(int fd, char *buf, size_t n)
