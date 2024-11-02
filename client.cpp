@@ -138,11 +138,11 @@ int main()
     if (err) {
         goto L_DONE;
     }
-    err = query(fd, "hello2");
+    err = query(fd, "hello22");
     if (err) {
         goto L_DONE;
     }
-    err = query(fd, "hello3");
+    err = query(fd, "hello333");
     if (err) {
         goto L_DONE;
     }

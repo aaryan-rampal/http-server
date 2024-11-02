@@ -8,23 +8,20 @@
 #include <sys/socket.h>
 #include <netinet/ip.h>
 #include <assert.h>
+#include <vector>
 
 const size_t k_max_msg = 4096;
 
 static int32_t read_full(int fd, char *buf, size_t n)
 {
-    while (n > 0)
+    ssize_t rv = read(fd, buf, n);
+    if (rv <= 0)
     {
-        ssize_t rv = read(fd, buf, n);
-        if (rv <= 0)
-        {
-            return -1;
-        }
-
-        assert((size_t)rv <= n);
-        n -= (size_t)rv;
-        buf += rv;
+        return -1;
     }
+
+    assert((size_t)rv <= n);
+    buf += rv;
     return 0;
 }
 
@@ -41,6 +38,52 @@ static int32_t write_all(int fd, const char *buf, size_t n) {
     }
     return 0;
 }
+
+static int32_t buffered_io(int connfd)
+{
+    /*
+    +-----+------+-----+------+--------
+    | len | msg1 | len | msg2 | more...
+    +-----+------+-----+------+--------
+    This is how our request will look like
+    */
+
+    // the header will be 4 bytes to determine size of msg
+    // last byte for eof indicator
+
+    int buf_len = 4 + k_max_msg + 1;
+    char rbuf[buf_len];
+    errno = 0;
+    int32_t err = read(connfd, rbuf, buf_len);
+    if (err <= 0)
+    {
+        printf("read() error");
+        return -1;
+    }
+
+    // ensure size of msg < k_max_msg
+    uint32_t len = 0;
+    // memcpy(&len, buffer.data(), 4);
+    memcpy(&len, rbuf, 4);
+    if (len > k_max_msg)
+    {
+        printf("msg too long");
+        return -1;
+    }
+    printf("length is %d\n", len);
+
+    // add eof indicator after the message length
+    rbuf[4 + len] = '\0';
+    printf("client says: %s\n", &rbuf[4]);
+
+    const char reply[] = "world";
+    char wbuf[4 + sizeof(reply)];
+    len = (uint32_t)strlen(reply);
+    memcpy(wbuf, &len, 4);
+    memcpy(&wbuf[4], reply, len);
+    return write_all(connfd, wbuf, 4 + len);
+}
+
 
 static int32_t one_request(int connfd)
 {
@@ -175,7 +218,8 @@ int main()
 
         while (true)
         {
-            int32_t err = one_request(connfd);
+            int32_t err = buffered_io(connfd);
+            // int32_t err = one_request(connfd);
             if (err)
             {
                 break;
