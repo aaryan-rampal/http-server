@@ -2,17 +2,14 @@
 cmake_minimum_required(VERSION 3.10)
 
 # Set project name
-project(NetworkApp)
-
-# Specify C++ standard
-set(CMAKE_CXX_STANDARD 11)
-set(CMAKE_CXX_STANDARD_REQUIRED True)
+project(NetworkApp C)
 
 # Set compile flags
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra -O2 -g")
+set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wall -Wextra -O2 -g")
 
 # Add executable for the server
-add_executable(server server.cpp)
+add_executable(server server.c)
 
 # Add executable for the client
-add_executable(client client.cpp)
+add_executable(client client.c)
+
