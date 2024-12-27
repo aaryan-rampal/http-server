@@ -1,10 +1,12 @@
-#include <sys/socket.h>
-#include <netinet/in.h>
-#include <arpa/inet.h>
-#include <unistd.h>
-#include <stdio.h>
+#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdio.h>
+#include <errno.h>
+#include <unistd.h>
+#include <arpa/inet.h>
+#include <sys/socket.h>
+#include <netinet/ip.h>
 
 void die(const char *message) {
     perror(message);
@@ -27,9 +29,11 @@ int main() {
     }
 
     char msg[] = "hello";
+    // on blocking sockets, write() will block until the data is sent
     write(fd, msg, strlen(msg));
 
     char rbuf[64] = {};
+    // on blocking sockets, read() will block until data is available
     ssize_t n = read(fd, rbuf, sizeof(rbuf) - 1);
     if (n < 0) {
         die("read");
