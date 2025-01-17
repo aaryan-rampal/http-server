@@ -8,6 +8,19 @@
 #include <sys/socket.h>
 #include <assert.h>
 #include <netinet/ip.h>
+#include <stdbool.h>
+
+
+struct Conn {
+    int fd;
+
+    // application's intention, for the event loop
+    bool want_read;
+    bool want_write;
+    bool want_close;
+
+    // buffered io
+};
 
 void msg(const char *message)
 {
