@@ -14,10 +14,10 @@ This project is a **Redis-inspired in-memory key-value store**, implemented in *
 ## ⚙️ Features
 - ✅ **Client-server architecture** using **TCP sockets**  
 - ✅ **Multi-client support** using `poll()` for efficient I/O  
-
-### 💚 Planned Features
 - **Basic Redis-like commands** (`SET`, `GET`, `DEL`, `EXISTS`, etc.)  
 - **Simple in-memory storage** with **hash maps**  
+
+### 💚 Planned Features
 - **Basic persistence (optional JSON/flat file storage)**  
 - **Logging for debugging**  
 - **LRU caching & eviction policies**
