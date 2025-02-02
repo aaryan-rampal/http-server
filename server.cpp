@@ -14,9 +14,18 @@
 #include <netinet/ip.h>
 // C++
 #include <vector>
+#include <string>
+#include <map>
 
-// const size_t k_max_msg = 4096;
 const size_t k_max_msg = 32 << 20;  // likely larger than the kernel buffer
+const size_t k_max_args = 200 * 1000;
+
+// Response::status
+enum {
+    RES_OK = 0,
+    RES_ERR = 1,    // error
+    RES_NX = 2,     // key not found
+};
 
 struct Conn {
     int fd = -1;
@@ -31,6 +40,43 @@ struct Conn {
     std::vector<uint8_t> incoming;  // input from read
     std::vector<uint8_t> outgoing;  // output to write
 };
+
+struct Response {
+    uint32_t status = 0;
+    std::vector<uint8_t> data;
+};
+
+static std::map<std::string, std::string> g_data;
+
+static void do_request(std::vector<std::string> &cmd, Response &out) {
+    if (cmd.size() == 2 && cmd[0] == "get") {
+        // GET key request for redis
+        auto it = g_data.find(cmd[1]);
+
+        // did not find key in map
+        if (it == g_data.end()) {
+            out.status = RES_NX;
+            return;
+        }
+
+        // assign the value to the response
+        const std::string &val = it->second;
+        out.data.assign(val.begin(), val.end());
+    } else if (cmd.size() == 3 && cmd[0] == "set") {
+        // SET key value request for redis
+        g_data[cmd[1]].swap(cmd[2]);
+        const std::string &val = g_data.find(cmd[1])->second;
+        out.data.assign(val.begin(), val.end());
+        out.status = RES_OK;
+    } else if (cmd.size() == 2 && cmd[0] == "del") {
+        // DEL key request for redis
+        g_data.erase(cmd[1]);
+        out.status = RES_OK;
+    } else {
+        // unrecognized command
+        out.status = RES_ERR;
+    }
+}
 
 static void msg(const char *msg) {
     fprintf(stderr, "%s\n", msg);
@@ -55,72 +101,107 @@ static void buf_consume(std::vector<uint8_t> &buf, size_t len) {
     buf.erase(buf.begin(), buf.begin() + len);
 }
 
-static bool try_one_request(Conn *conn) {
-    // try to parse the buffer
-    if (conn->incoming.size() < 4) {
+static bool read_u32(const uint8_t *&curr, const uint8_t *end, uint32_t &out) {
+    // if there isn't enough space to read 4 bytes, return false
+    if (curr + 4 > end) {
         return false;
     }
 
-    // get length of the incoming data and ensure it's under our max limit
+    // update out and curr
+    memcpy(&out, curr, 4);
+    curr += 4;
+    return true;
+}
+
+static bool read_str(const uint8_t *&curr, const uint8_t *end, size_t n, std::string &out) {
+    if (curr + n > end) {
+        return false;
+    }
+    out.assign(curr, curr + n);
+    curr += n;
+    return true;
+}
+
+static int32_t parse_req(const uint8_t *data, size_t size, std::vector<std::string> &out) {
+    // find end pointer of data
+    const uint8_t *end = data + size;
+
+    // find num of arguments in the request
+    uint32_t nstr = 0;
+    // if you can't read the number of arguments, return -1
+    if (!read_u32(data, end, nstr)) {
+        return -1;
+    }
+    // if the number of arguments is greater than the max, return -1
+    if (nstr > k_max_args) {
+        return -1;
+    }
+
+    // read the arguments
+    while (out.size() < nstr) {
+        uint32_t len = 0;  
+        if (!read_u32(data, end, len)) {
+            return -1;
+        }
+        out.push_back(std::string());
+        if(!read_str(data, end, len, out.back())) {
+            return -1;
+        }
+    }
+
+    // if there's still data left, return -1
+    if (data != end) {
+        return -1;
+    }
+    return 0;
+
+}
+
+static void make_response(const Response &resp, std::vector<uint8_t> &out) {
+    uint32_t resp_len = 4 + (uint32_t)resp.data.size();
+
+    printf("Response Length: %u\n", resp_len);
+    printf("Response Status: %u\n", resp.status);
+    std::string response_data(resp.data.begin(), resp.data.end());
+    printf("Response Data (%lu bytes): %s\n", resp.data.size(), response_data.c_str());
+    // appends response length, then response status and finally response data to buffer
+    buf_append(out, (const uint8_t *)&resp_len, 4);
+    buf_append(out, (const uint8_t *)&resp.status, 4);
+    buf_append(out, resp.data.data(), resp.data.size());
+}
+
+static bool try_one_request(Conn *conn) {
+    // try to parse the protocol: message header
+    if (conn->incoming.size() < 4) {
+        return false;   // want read
+    }
     uint32_t len = 0;
     memcpy(&len, conn->incoming.data(), 4);
     if (len > k_max_msg) {
         msg("too long");
-        printf("%d\n", len);
+        conn->want_close = true;
+        return false;   // want close
+    }
+    // message body
+    if (4 + len > conn->incoming.size()) {
+        return false;   // want read
+    }
+    const uint8_t *request = &conn->incoming[4];
+
+    // got one request, do some application logic
+    std::vector<std::string> cmd;
+    if (parse_req(request, len, cmd) < 0) {
         conn->want_close = true;
         return false;
     }
 
-    // our protocol dictates we must have a 4 byte header + len bytes of data
-    if (4 + len > conn->incoming.size()) {
-        return false;
-    }
+    Response resp;
+    do_request(cmd, resp);
+    make_response(resp, conn->outgoing);
 
-    const uint8_t *request = &conn->incoming[4];
-    // got one request, do some application logic
-    printf("client says: len:%d data:%.*s\n",
-        len, len < 100 ? len : 100, request);
-
-    // generate response and add it to the outgoing buffer
-    // currently response just echoes back to the client what they said
-    buf_append(conn->outgoing, (const uint8_t *)&len, 4);
-    buf_append(conn->outgoing, request, len);
-
-    // remove the request from the incoming buffer
-    // also setup to handle pipilining 
     buf_consume(conn->incoming, 4 + len);
-
     // everything went well
     return true;
-}
-
-static void handle_read(Conn *conn) {
-    // want to do a non-blocking read
-    uint8_t buf[64 * 1024];
-    ssize_t rv = read(conn->fd, buf, sizeof(buf));
-
-    if (rv <= 0) {
-        // if there's an error, we just close the connection?
-        conn->want_close = true;
-        return;
-    }
-
-    // add new data to the incoming buffer for connection
-    buf_append(conn->incoming, buf, (size_t)rv);
-
-    // instead of assuming we only have one request, we will
-    // implement pipelining by treating input as byte stream
-    while (try_one_request(conn)) {
-        // still has data to write, won't read until data has been written
-        if (conn->outgoing.size() > 0) {
-            conn->want_read = false;
-            conn->want_write = true;
-
-            // socket likely ready to write so do it
-            return handle_write(conn);
-        }
-    }
-
 }
 
 static void handle_write(Conn *conn) {
@@ -149,6 +230,50 @@ static void handle_write(Conn *conn) {
         conn->want_write = false;
     }
 }
+
+static void handle_read(Conn *conn) {
+    // want to do a non-blocking read
+    uint8_t buf[64 * 1024];
+    ssize_t rv = read(conn->fd, buf, sizeof(buf));
+
+    if (rv < 0 && errno == EAGAIN) {
+        return; // actually not ready
+    }
+    // handle IO error
+    if (rv < 0) {
+        msg_errno("read() error");
+        conn->want_close = true;
+        return; // want close
+    }
+    // handle EOF
+    if (rv == 0) {
+        if (conn->incoming.size() == 0) {
+            msg("client closed");
+        } else {
+            msg("unexpected EOF");
+        }
+        conn->want_close = true;
+        return; // want close
+    }
+
+    // add new data to the incoming buffer for connection
+    buf_append(conn->incoming, buf, (size_t)rv);
+
+    // instead of assuming we only have one request, we will
+    // implement pipelining by treating input as byte stream
+    while (try_one_request(conn)) {
+    }
+
+    if (conn->outgoing.size() > 0) {
+        conn->want_read = false;
+        conn->want_write = true;
+
+        // socket likely ready to write so do it
+        return handle_write(conn);
+    }
+
+}
+
 
 // make listening socket non blocking
 static void fd_set_nb(int fd) {
