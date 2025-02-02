@@ -15,7 +15,8 @@
 // C++
 #include <vector>
 
-const size_t k_max_msg = 4096;
+// const size_t k_max_msg = 4096;
+const size_t k_max_msg = 32 << 20;  // likely larger than the kernel buffer
 
 struct Conn {
     int fd = -1;
@@ -65,6 +66,7 @@ static bool try_one_request(Conn *conn) {
     memcpy(&len, conn->incoming.data(), 4);
     if (len > k_max_msg) {
         msg("too long");
+        printf("%d\n", len);
         conn->want_close = true;
         return false;
     }
@@ -85,6 +87,7 @@ static bool try_one_request(Conn *conn) {
     buf_append(conn->outgoing, request, len);
 
     // remove the request from the incoming buffer
+    // also setup to handle pipilining 
     buf_consume(conn->incoming, 4 + len);
 
     // everything went well
@@ -104,13 +107,20 @@ static void handle_read(Conn *conn) {
 
     // add new data to the incoming buffer for connection
     buf_append(conn->incoming, buf, (size_t)rv);
-    try_one_request(conn);
 
-    // still has data to write, won't read until data has been written
-    if (conn->outgoing.size() > 0) {
-        conn->want_read = false;
-        conn->want_write = true;
+    // instead of assuming we only have one request, we will
+    // implement pipelining by treating input as byte stream
+    while (try_one_request(conn)) {
+        // still has data to write, won't read until data has been written
+        if (conn->outgoing.size() > 0) {
+            conn->want_read = false;
+            conn->want_write = true;
+
+            // socket likely ready to write so do it
+            return handle_write(conn);
+        }
     }
+
 }
 
 static void handle_write(Conn *conn) {
@@ -118,6 +128,12 @@ static void handle_write(Conn *conn) {
     assert(conn->outgoing.size() > 0);
 
     ssize_t rv = write(conn->fd, conn->outgoing.data(), conn->outgoing.size());
+
+    if (rv < 0 && errno == EAGAIN) {
+        // not actually ready
+        return;
+    }
+
     // if we can't write, we just close the connection
     if (rv < 0) {
         conn->want_close = true;
